@@ -4,6 +4,7 @@
  */
 
 #include <Wire.h>
+//#include "BluetoothSerial.h"
 #include "PID_v1.h"
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
@@ -59,30 +60,48 @@ const int freq = 30000;
 const int pwmChannel0 = 0;
 const int pwmChannel1 = 1;
 const int resolution = 8;
-uint8_t dutyCycle = 200;
+uint8_t dutyCycle0 = 200;
+uint8_t dutyCycle1 = 200;
 
 /* PID properties */
-double originalSetpoint = -0.05
-;
+double originalSetpoint = -0.05;
 double setpoint = originalSetpoint;
 double movingAngleOffset = 0.1;
 double input, output;
 
-//double Kp = 90;
-//double Kd = 7;
-//double Ki = 100;
-double Kp = 120;
-double Kd = 5;
-double Ki = 150;
-PID pid(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT);
+//double Kpt = 90;
+//double Kdt = 7;
+//double Kit = 100;
+double Kpt = 120;
+double Kdt = 5;
+double Kit = 150;
+
+double setpointy = 0.0;
+double inputy, outputy;
+double Kpy = 15;
+double Kdy = 2;
+double Kiy = 0;
+PID pidTilt(&input, &output, &setpoint, Kpt, Kit, Kdt, DIRECT);
+PID pidYaw(&inputy, &outputy, &setpointy, Kpy, Kiy, Kdy, DIRECT);
+
 float curr =  0x7FFFFFFF;
 float prev =  0x7FFFFFFF;
 float diff = 0.0;
 
+/* Motor output */
+double out0, out1;
+
+uint8_t remote_buff[4]; 
+uint16_t* remote_16 = (uint16_t*)remote_buff;
+
 /* Serial In */
 String serBuff = ""; 
+
+//BluetoothSerial SerialBT;
  
 void setup() {
+  /* Create Bluetooth Serial */
+  //SerialBT.begin("OTIS-BOT");
   /* Set the serial baud rate*/
   Serial.begin(SERIAL_BAUD);
   /* Setup the I2C bus */
@@ -93,48 +112,116 @@ void setup() {
   initialize_pwm();
 
   /* Setup PID */
-  pid.SetMode(AUTOMATIC);
-  pid.SetSampleTime(10);
-  pid.SetOutputLimits(-255, 255); 
+  pidTilt.SetMode(AUTOMATIC);
+  pidTilt.SetSampleTime(10);
+  pidTilt.SetOutputLimits(-255, 255); 
+
+  pidYaw.SetMode(AUTOMATIC);
+  pidYaw.SetSampleTime(10);
+  pidYaw.SetOutputLimits(-255, 255); 
 
  
 }
 
 void loop() {
 
-  if(Serial.available() > 0)
+  /*if (SerialBT.available() > 0)
   {
-    float kp, ki, kd;
+    SerialBT.readBytes(remote_buff, 4);
     
+
+    setpoint = (0.4*((float)remote_16[0]))/((float)(2 << 16 - 1)) - 0.2;
+    //setpointy = 2*3.1415 * ((float)remote_16[1])/((float)(2 << 16)) - 3.1415;
+    Serial.print(setpoint);
+    Serial.print(" ");
+    Serial.println(setpointy);
+  }
+*/
+  if(Serial.available() > 0)
+  {   
+    Serial.setTimeout(90);
     serBuff = Serial.readString(); 
-    
-    char __serBuff[sizeof(serBuff)];
-    serBuff.toCharArray(__serBuff, sizeof(__serBuff));    
 
-    int result = sscanf(__serBuff, "%f, %f, %f", &kp, &ki, &kd);
-
-    pid.SetTunings((double)kp, (double)ki, (double)kd);
-
-    Serial.print("PID Gains Changed. P:");
-    Serial.print(pid.GetKp());
-    Serial.print(" I:");
-    Serial.print(pid.GetKi());
-    Serial.print(" D:");
-    Serial.println(pid.GetKd());
+    if(serBuff.substring(0, 4) == "KILL"){
+            Serial.println("Killing Motors");
+            // TODO: Kill Motors
+    }else if (serBuff.substring(0, 7) == "SETTILT"){
+      double tiltAngle;
+      char __serBuff[sizeof(serBuff)];
+      serBuff.toCharArray(__serBuff, sizeof(__serBuff));    
+      int result = sscanf(__serBuff, "SETTILT %lf", &tiltAngle);
+      Serial.print("Setting Tilt: ");
+      Serial.println(tiltAngle/100);      
+      setpoint = tiltAngle/100.0;
+    } else if(serBuff.substring(0, 6) == "SETYAW"){
+      double yawAngle;
+      char __serBuff[sizeof(serBuff)];
+      serBuff.toCharArray(__serBuff, sizeof(__serBuff));    
+      int result = sscanf(__serBuff, "SETYAW %lf", &yawAngle);
+      Serial.print("Setting yaw: ");
+      Serial.println(yawAngle/100);  
+      setpointy = yawAngle/100.0;
+      
+    }else if(serBuff.substring(0, 6) == "SETPID") {
+      double kpt, kit, kdt;
+      char __serBuff[sizeof(serBuff)];
+      serBuff.toCharArray(__serBuff, sizeof(__serBuff));    
+      int result = sscanf(__serBuff, "SETPID %lf %lf %lf", &kpt, &kit, &kdt);
+  
+      pidTilt.SetTunings((double)kpt, (double)kit, (double)kdt);
+  
+      Serial.print("PID Gains Changed. P:");
+      Serial.print(pidTilt.GetKp());
+      Serial.print(" I:");
+      Serial.print(pidTilt.GetKi());
+      Serial.print(" D:");
+      Serial.println(pidTilt.GetKd());
+    }
   }
   
   fetch_ypr();
   input = ypr[1];
+  inputy = ypr[0];
 
-  pid.Compute();
+  pidTilt.Compute();
+  pidYaw.Compute();
+  
+  out0 = output - outputy;
+  out1 = output + outputy;
 
-  Serial.print(diff);
-  Serial.print(" ");
-  Serial.print(input);
-  Serial.print(" ");
-  Serial.print(output);
+  if(out0 > 0.0){
+    digitalWrite(DR0, false);
+  } else {
+    digitalWrite(DR0, true);
+  }
 
-  if(output > 0.0){
+  if(out1 > 0.0){
+    digitalWrite(DR1, true);
+  } else {
+    digitalWrite(DR1, false);
+  }
+
+  double duty_mag0 = abs(255.0/50.0*min(50, abs(out0)));
+  double duty_mag1 = abs(255.0/50.0*min(50, abs(out1)));
+  dutyCycle0 = (uint8_t)duty_mag0;
+  dutyCycle1 = (uint8_t)duty_mag1;
+
+  if(fabs(input) < 0.6){
+    ledcWrite(pwmChannel1, dutyCycle1); 
+    ledcWrite(pwmChannel0, dutyCycle0);
+  } else {
+    ledcWrite(pwmChannel0, 0); 
+    ledcWrite(pwmChannel1, 0);
+  }
+  
+
+  //Serial.print(diff);
+  //Serial.print(" ");
+  //Serial.print(input);
+  //Serial.print(" ");
+  //Serial.print(output);
+
+  /*if(output > 0.0){
     digitalWrite(DR1, true);
     digitalWrite(DR0, false);
     
@@ -142,18 +229,18 @@ void loop() {
   else {
     digitalWrite(DR1, false);
     digitalWrite(DR0, true);
-  }
+  }*/
 
 
   
-  double duty_mag = abs(255.0/50.0*min(50, abs(output)));
-  dutyCycle = (uint8_t)duty_mag;
+  //double duty_mag = abs(255.0/50.0*min(50, abs(output)));
+  //dutyCycle = (uint8_t)duty_mag;
 
-  Serial.print(" ");
-  Serial.println(dutyCycle);
+  //Serial.print(" ");
+  //Serial.println(dutyCycle);
   
 
-  if(prevDuty != dutyCycle)
+  /*if(prevDuty != dutyCycle)
   {
     
     if(fabs(input) < 0.6){
@@ -169,9 +256,9 @@ void loop() {
   if (fabs(input) > 1.0) {
     ledcWrite(pwmChannel0, 0); 
     ledcWrite(pwmChannel1, 0);
-  }
+  }*/
 
-  prevDuty = dutyCycle;
+//  prevDuty = dutyCycle;
 }
 
 void initialize_pwm(){
