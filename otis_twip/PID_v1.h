@@ -88,5 +88,6 @@ class PID
 	double outMin, outMax;
 	bool inAuto, pOnE;
 };
-#endif
 
+double wraptopi(double x);
+#endif

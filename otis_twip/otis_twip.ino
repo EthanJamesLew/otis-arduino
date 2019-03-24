@@ -4,10 +4,12 @@
  */
 
 #include <Wire.h>
-//#include "BluetoothSerial.h"
+#include "BluetoothSerial.h"
 #include "PID_v1.h"
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+
+//#include <WiFi.h>
 
 /* MACROS */
 #define SERIAL_BAUD 115200
@@ -76,7 +78,7 @@ double Kpt = 120;
 double Kdt = 5;
 double Kit = 150;
 
-double setpointy = 0.0;
+double setpointy = 100.0;
 double inputy, outputy;
 double Kpy = 15;
 double Kdy = 2;
@@ -88,20 +90,43 @@ float curr =  0x7FFFFFFF;
 float prev =  0x7FFFFFFF;
 float diff = 0.0;
 
+
 /* Motor output */
 double out0, out1;
 
 uint8_t remote_buff[4]; 
-uint16_t* remote_16 = (uint16_t*)remote_buff;
+const uint16_t* remote_16 = (const uint16_t*)remote_buff;
 
 /* Serial In */
 String serBuff = ""; 
 
-//BluetoothSerial SerialBT;
+/* Websockets Control */
+
+#define SSID "OTIS-bot"
+#define PASSWORD "japery2019"
+#define SERVER_PORT 4141
+
+#define PACKET_SIZE 4
+
+#define IS_SERVER
+
+enum Protocol{
+    TILT_SET, 
+    YAW_SET
+};
+
+/*
+WiFiServer server(SERVER_PORT);
+WiFiClient client;
+size_t len;
+*/
+uint16_t tiltNumber, yawNumber;
+
+BluetoothSerial SerialBT;
  
 void setup() {
   /* Create Bluetooth Serial */
-  //SerialBT.begin("OTIS-BOT");
+  SerialBT.begin("OTIS-BOT");
   /* Set the serial baud rate*/
   Serial.begin(SERIAL_BAUD);
   /* Setup the I2C bus */
@@ -120,23 +145,81 @@ void setup() {
   pidYaw.SetSampleTime(10);
   pidYaw.SetOutputLimits(-255, 255); 
 
+  /* Setup the AP */
+  //WiFi.mode(WIFI_AP);
+  //WiFi.softAP(SSID, PASSWORD);
+  //server.begin();  
+
  
 }
 
+
+
 void loop() {
 
-  /*if (SerialBT.available() > 0)
+  fetch_ypr();
+  input = ypr[1];
+  inputy = ypr[0];
+
+  if(setpointy > 4.0){
+    setpointy = ypr[0];
+  }
+
+  if (SerialBT.available() > 0)
   {
     SerialBT.readBytes(remote_buff, 4);
-    
 
-    setpoint = (0.4*((float)remote_16[0]))/((float)(2 << 16 - 1)) - 0.2;
+    tiltNumber = remote_16[0];
+    yawNumber = remote_16[1];
+
+    float tiltDecode = ((float)tiltNumber) /(65535.0f)*(2.0f) - 1.05f;
+    float yawDecode = ((float)yawNumber) /(65535.0f)*(2.0f) - 1.0f;
+
+    tiltDecode *= 0.3;
+    yawDecode *= 0.2;
+
+    Serial.print("Received. Tilt:");
+    Serial.print(tiltDecode);
+    Serial.print(" Yaw:");
+    Serial.println(yawDecode);
+
+    setpoint = tiltDecode;
+    setpointy +=  yawDecode;   
+
+    //setpoint = (0.4*((float)remote_16[0]))/((float)(2 << 16 - 1)) - 0.2;
     //setpointy = 2*3.1415 * ((float)remote_16[1])/((float)(2 << 16)) - 3.1415;
-    Serial.print(setpoint);
-    Serial.print(" ");
-    Serial.println(setpointy);
+    //Serial.print(setpoint);
+   // Serial.print(" ");
+    //Serial.println(setpointy);
   }
-*/
+
+/*
+ client = server.available();
+  if (client){  
+    if (client.available()) {
+      uint8_t buffer[PACKET_SIZE];
+      len = client.read(buffer, PACKET_SIZE);
+      const uint16_t* buff16 = (const uint16_t*)buffer;
+      tiltNumber = buff16[0];
+      yawNumber = buff16[1];
+
+      float tiltDecode = ((float)tiltNumber) /(65535.0f)*(2.0f) - 1.0f;
+      float yawDecode = ((float)yawNumber) /(65535.0f)*(2.0f) - 1.0f;
+
+      tiltDecode *= 0.2;
+      yawDecode *= 0.01;
+
+      Serial.print("Received. Tilt:");
+      Serial.print(tiltDecode);
+      Serial.print(" Yaw:");
+      Serial.println(yawDecode);
+
+      setpoint = tiltDecode;
+      setpointy +=  yawDecode;
+    }
+  }
+  */
+  
   if(Serial.available() > 0)
   {   
     Serial.setTimeout(90);
@@ -178,14 +261,17 @@ void loop() {
       Serial.println(pidTilt.GetKd());
     }
   }
-  
-  fetch_ypr();
-  input = ypr[1];
-  inputy = ypr[0];
+ 
 
+  
+
+  Serial.print( wraptopi(setpointy - ypr[0]));
+  Serial.print(" ");
+  Serial.println(wraptopi(setpoint - ypr[1]));
+  
   pidTilt.Compute();
   pidYaw.Compute();
-  
+
   out0 = output - outputy;
   out1 = output + outputy;
 
@@ -213,13 +299,17 @@ void loop() {
     ledcWrite(pwmChannel0, 0); 
     ledcWrite(pwmChannel1, 0);
   }
-  
 
-  //Serial.print(diff);
-  //Serial.print(" ");
-  //Serial.print(input);
-  //Serial.print(" ");
-  //Serial.print(output);
+  
+/*
+  Serial.print(ypr[0]);
+  Serial.print(" ");
+  Serial.print(ypr[1]);
+  Serial.print(" ");
+  Serial.print(outputy);
+  Serial.print(" ");
+  Serial.println(output);
+  */
 
   /*if(output > 0.0){
     digitalWrite(DR1, true);

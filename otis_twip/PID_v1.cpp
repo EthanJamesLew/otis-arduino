@@ -64,7 +64,8 @@ bool PID::Compute()
    {
       /*Compute all the working error variables*/
       double input = *myInput;
-      double error = *mySetpoint - input;
+      /* elew */
+      double error = wraptopi(*mySetpoint - input);
       double dInput = (input - lastInput);
       outputSum+= (ki * error);
 
@@ -227,3 +228,13 @@ double PID::GetKd(){ return  dispKd;}
 int PID::GetMode(){ return  inAuto ? AUTOMATIC : MANUAL;}
 int PID::GetDirection(){ return controllerDirection;}
 
+/* elew */
+double wraptopi(double x){
+  float pi = 3.141592;
+  float ans = x;
+  ans -= ((float)floor(ans/(2*pi))) * 2 * pi;
+  if (ans > pi){
+    ans -= 2*pi;
+  }
+  return ans;
+}
