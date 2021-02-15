@@ -287,8 +287,8 @@ void loop() {
     digitalWrite(DR1, false);
   }
 
-  double duty_mag0 = abs(255.0/50.0*min(50, abs(out0)));
-  double duty_mag1 = abs(255.0/50.0*min(50, abs(out1)));
+  double duty_mag0 = abs(255.0/50.0*min((double)50, abs(out0)));
+  double duty_mag1 = abs(255.0/50.0*min((double)50, abs(out1)));
   dutyCycle0 = (uint8_t)duty_mag0;
   dutyCycle1 = (uint8_t)duty_mag1;
 
